@@ -21,7 +21,6 @@
 #   .\psycopilot-installer-windows.ps1 -TestAudioOnly
 #   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; .\psycopilot-installer-windows.ps1 -InstallVirtualAudio
 #   .\psycopilot-installer-windows.ps1 -EnableWSL
-#   .\psycopilot-installer-windows.ps1 -Force  # Overwrite existing installation
 
 param(
     [switch]$EnableWSL,
@@ -29,8 +28,7 @@ param(
     [switch]$TestAudioOnly,
     [string]$PythonVersion = "3.13",
     [string]$InstallDir = "$env:USERPROFILE\psycopilot",
-    [string]$GitHubToken,
-    [switch]$Force
+    [string]$GitHubToken
 )
 
 # Configuration
@@ -120,45 +118,19 @@ function Test-InstallationDirectory {
     Write-Info "Checking installation directory..."
     
     if (Test-Path $InstallDir) {
-        Write-Warning "Installation directory already exists: $InstallDir"
-        Write-Warning "Contents:"
-        Get-ChildItem $InstallDir | ForEach-Object { Write-Warning "  - $($_.Name)" }
-        
-        if ($Force) {
-            Write-Info "Force flag specified. Removing existing directory..."
-            try {
-                Remove-Item -Path $InstallDir -Recurse -Force
-                Write-Success "Existing directory removed"
-            } catch {
-                Write-Error "Failed to remove existing directory: $_"
-                Write-Error "Please close any applications using files in this directory and try again"
-                exit 1
-            }
-        } else {
-            Write-Warning "Installation directory already exists!"
-            Write-Warning "Options:"
-            Write-Warning "1. Use -Force flag to overwrite: .\psycopilot-installer-windows.ps1 -Force"
-            Write-Warning "2. Choose different directory: .\psycopilot-installer-windows.ps1 -InstallDir 'C:\NewPsycoPilot'"
-            Write-Warning "3. Remove existing directory manually and run installer again"
-            Write-Host ""
-            Write-ColorOutput "Keeping terminal open for 30 seconds so you can read this message..." "Yellow"
-            Write-ColorOutput "Press any key to exit immediately, or wait 30 seconds..." "Yellow"
-            
-            # Try to read a key with timeout
-            try {
-                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-            } catch {
-                Write-ColorOutput "Press Enter to continue..." "Yellow"
-                Read-Host
-            }
-            
-            # If no key was pressed, wait 30 seconds
-            Write-ColorOutput "Waiting 30 seconds before closing..." "Yellow"
-            Start-Sleep -Seconds 30
+        Write-Info "Installation directory already exists: $InstallDir"
+        Write-Info "Contents:"
+        Get-ChildItem $InstallDir | ForEach-Object { Write-Info "  - $($_.Name)" }
+        Write-Info "Continuing with existing directory..."
+    } else {
+        Write-Info "Creating installation directory: $InstallDir"
+        try {
+            New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+            Write-Success "Installation directory created: $InstallDir"
+        } catch {
+            Write-Error "Failed to create installation directory: $_"
             exit 1
         }
-    } else {
-        Write-Success "Installation directory is available: $InstallDir"
     }
 }
 
@@ -304,19 +276,32 @@ function Install-Chocolatey {
         # Wait a moment for PATH to update
         Start-Sleep -Seconds 3
         
+        # Add Chocolatey bin directory explicitly to PATH for this session
+        $chocoPath = "C:\ProgramData\chocolatey\bin"
+        if (Test-Path $chocoPath) {
+            Write-Info "Adding Chocolatey bin directory to PATH: $chocoPath"
+            $env:Path = "$chocoPath;$env:Path"
+        }
+        
+        # Wait a moment for PATH to take effect
+        Start-Sleep -Seconds 5
+        
         # Verify Chocolatey installation
         if (Get-Command choco -ErrorAction SilentlyContinue) {
             Write-Success "Chocolatey installed successfully"
+            $chocoVersion = & choco --version
+            Write-Info "Chocolatey version: $chocoVersion"
         } else {
-            Write-Warning "Chocolatey installed but not found in PATH. Trying to refresh again..."
-            # Try to refresh PATH again
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Start-Sleep -Seconds 2
-            
-            if (Get-Command choco -ErrorAction SilentlyContinue) {
-                Write-Success "Chocolatey found after PATH refresh"
+            Write-Warning "Chocolatey installation completed but not found in PATH"
+            Write-Warning "Trying to use full path to choco.exe..."
+            $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
+            if (Test-Path $chocoExe) {
+                Write-Info "Found choco.exe at: $chocoExe"
+                # Create an alias for this session
+                Set-Alias -Name choco -Value $chocoExe
+                Write-Success "Chocolatey available via full path"
             } else {
-                throw "Chocolatey installation completed but 'choco' command not found in PATH"
+                throw "Chocolatey installation failed - choco.exe not found"
             }
         }
     } catch {
@@ -632,7 +617,7 @@ function Setup-PythonEnvironment {
         
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
         Set-Location $InstallDir
-        
+
         # Create virtual environment
         Write-Info "Creating Python virtual environment..."
         python -m venv .venv
@@ -644,7 +629,7 @@ function Setup-PythonEnvironment {
         # Upgrade pip
         Write-Info "Upgrading pip..."
         python -m pip install --upgrade pip wheel setuptools
-        
+
         Write-Success "Python environment created"
         
     } catch {
