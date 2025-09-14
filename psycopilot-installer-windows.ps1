@@ -131,11 +131,30 @@ function Test-InstallationDirectory {
                 Write-Success "Existing directory removed"
             } catch {
                 Write-Error "Failed to remove existing directory: $_"
+                Write-Error "Please close any applications using files in this directory and try again"
                 exit 1
             }
         } else {
-            Write-Warning "Use -Force flag to overwrite existing installation"
-            Write-Warning "Or choose a different installation directory with -InstallDir"
+            Write-Warning "Installation directory already exists!"
+            Write-Warning "Options:"
+            Write-Warning "1. Use -Force flag to overwrite: .\psycopilot-installer-windows.ps1 -Force"
+            Write-Warning "2. Choose different directory: .\psycopilot-installer-windows.ps1 -InstallDir 'C:\NewPsycoPilot'"
+            Write-Warning "3. Remove existing directory manually and run installer again"
+            Write-Host ""
+            Write-ColorOutput "Keeping terminal open for 30 seconds so you can read this message..." "Yellow"
+            Write-ColorOutput "Press any key to exit immediately, or wait 30 seconds..." "Yellow"
+            
+            # Try to read a key with timeout
+            try {
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            } catch {
+                Write-ColorOutput "Press Enter to continue..." "Yellow"
+                Read-Host
+            }
+            
+            # If no key was pressed, wait 30 seconds
+            Write-ColorOutput "Waiting 30 seconds before closing..." "Yellow"
+            Start-Sleep -Seconds 30
             exit 1
         }
     } else {
@@ -836,24 +855,52 @@ function Main {
             return
         }
         
+        Write-Host ""
+        Write-ColorOutput "===========================================" "Cyan"
+        Write-ColorOutput "RUNNING SYSTEM CHECKS" "Cyan"
+        Write-ColorOutput "===========================================" "Cyan"
+        Write-Host ""
+        
+        Write-Info "Checking system requirements..."
         Test-SystemRequirements
+        
+        Write-Info "Validating GitHub token..."
         Test-GitHubToken
+        
+        Write-Info "Checking installation directory..."
         Test-InstallationDirectory
         
+        Write-Host ""
+        Write-ColorOutput "System checks completed!" "Green"
+        Write-Host ""
+        
         # Install system dependencies
+        Write-Host ""
+        Write-ColorOutput "===========================================" "Cyan"
+        Write-ColorOutput "INSTALLING SYSTEM DEPENDENCIES" "Cyan"
+        Write-ColorOutput "===========================================" "Cyan"
+        Write-Host ""
+        
         Write-Info "Starting system dependency installation..."
         Install-Chocolatey
         
+        Write-Host ""
         Write-Info "Installing Python..."
         Install-Python
         Refresh-EnvironmentPath
         
+        Write-Host ""
         Write-Info "Installing Visual C++ Redistributables..."
         Install-VisualCppRedistributables
         
+        Write-Host ""
         Write-Info "Installing Git..."
         Install-Git
         Refresh-EnvironmentPath
+        
+        Write-Host ""
+        Write-ColorOutput "System dependencies installation completed!" "Green"
+        Write-Host ""
         
         # Enable WSL by default (unless explicitly disabled or only testing audio)
         if ($EnableWSL -or (-not $TestAudioOnly)) {
@@ -867,10 +914,27 @@ function Main {
         }
         
         # Setup application
+        Write-Host ""
+        Write-ColorOutput "===========================================" "Cyan"
+        Write-ColorOutput "SETTING UP PSYCOPILOT APPLICATION" "Cyan"
+        Write-ColorOutput "===========================================" "Cyan"
+        Write-Host ""
+        
+        Write-Info "Setting up Python environment..."
         Setup-PythonEnvironment
+        
+        Write-Info "Downloading PsycoPilot application..."
         Download-PsycoPilot
+        
+        Write-Info "Installing Python dependencies..."
         Install-PythonDependencies
+        
+        Write-Info "Creating start scripts..."
         Create-StartScripts
+        
+        Write-Host ""
+        Write-ColorOutput "Application setup completed!" "Green"
+        Write-Host ""
         
         # Audio setup and testing
         Write-Host ""
@@ -882,7 +946,11 @@ function Main {
         Show-CompletionMessage
         
         Write-Host ""
-        Write-ColorOutput "Press any key to exit..." "Green"
+        Write-ColorOutput "Installation completed successfully!" "Green"
+        Write-ColorOutput "Keeping terminal open for 30 seconds so you can read the output..." "Yellow"
+        Write-ColorOutput "Press any key to exit immediately, or wait 30 seconds..." "Yellow"
+        
+        # Try to read a key with timeout
         try {
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         } catch {
@@ -890,18 +958,30 @@ function Main {
             Read-Host
         }
         
+        # If no key was pressed, wait 30 seconds
+        Write-ColorOutput "Waiting 30 seconds before closing..." "Yellow"
+        Start-Sleep -Seconds 30
+        
     } catch {
         Write-Error "Installation failed: $_"
         Write-Error "Error details: $($_.Exception.Message)"
         Write-Error "Stack trace: $($_.ScriptStackTrace)"
         Write-Host ""
-        Write-ColorOutput "Press any key to exit..." "Yellow"
+        Write-ColorOutput "Installation failed!" "Red"
+        Write-ColorOutput "Keeping terminal open for 30 seconds so you can read the error details..." "Yellow"
+        Write-ColorOutput "Press any key to exit immediately, or wait 30 seconds..." "Yellow"
+        
+        # Try to read a key with timeout
         try {
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         } catch {
             Write-ColorOutput "Press Enter to continue..." "Yellow"
             Read-Host
         }
+        
+        # If no key was pressed, wait 30 seconds
+        Write-ColorOutput "Waiting 30 seconds before closing..." "Yellow"
+        Start-Sleep -Seconds 30
         exit 1
     }
 }
@@ -919,13 +999,14 @@ Write-Info "Current User: $([System.Environment]::UserName)"
 Write-Info "Current Directory: $(Get-Location)"
 Write-Info "Script Path: $($MyInvocation.MyCommand.Path)"
 Write-Host ""
-Write-ColorOutput "Script is starting... Press any key to continue or wait 5 seconds..." "Yellow"
+Write-ColorOutput "Script is starting... Press any key to continue or wait 10 seconds..." "Yellow"
 
 # Add a timeout pause to ensure the script is running
 try {
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 } catch {
-    Start-Sleep -Seconds 5
+    Write-ColorOutput "No key pressed, waiting 10 seconds before starting..." "Yellow"
+    Start-Sleep -Seconds 10
 }
 
 Write-Host ""
@@ -947,12 +1028,20 @@ try {
     Write-ColorOutput "This error occurred outside the main installation process." "Yellow"
     Write-ColorOutput "Please check the error details above and try again." "Yellow"
     Write-Host ""
-    Write-ColorOutput "Press any key to exit..." "Red"
+    Write-ColorOutput "Critical error occurred!" "Red"
+    Write-ColorOutput "Keeping terminal open for 30 seconds so you can read the error details..." "Yellow"
+    Write-ColorOutput "Press any key to exit immediately, or wait 30 seconds..." "Yellow"
+    
+    # Try to read a key with timeout
     try {
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     } catch {
         Write-ColorOutput "Press Enter to continue..." "Red"
         Read-Host
     }
+    
+    # If no key was pressed, wait 30 seconds
+    Write-ColorOutput "Waiting 30 seconds before closing..." "Yellow"
+    Start-Sleep -Seconds 30
     exit 1
 }
