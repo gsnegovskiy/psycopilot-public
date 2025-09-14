@@ -256,56 +256,99 @@ function Test-GitHubToken {
     }
 }
 
+function Invoke-ChocolateyCommand {
+    param(
+        [string]$Command,
+        [string]$Arguments = ""
+    )
+    
+    # Try to use choco command first
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        Write-Info "Using choco command: choco $Command $Arguments"
+        $result = & choco $Command $Arguments 2>&1
+        return $result
+    }
+    
+    # Fallback to full path
+    $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
+    if (Test-Path $chocoExe) {
+        Write-Info "Using full path to choco.exe: $chocoExe $Command $Arguments"
+        $result = & $chocoExe $Command $Arguments 2>&1
+        return $result
+    }
+    
+    throw "Chocolatey not found. Please ensure Chocolatey is installed."
+}
+
 function Install-Chocolatey {
     Write-Info "Installing Chocolatey package manager..."
     
+    # Check if Chocolatey is already available
     if (Get-Command choco -ErrorAction SilentlyContinue) {
         Write-Success "Chocolatey already installed"
+        $chocoVersion = & choco --version
+        Write-Info "Chocolatey version: $chocoVersion"
+        return
+    }
+    
+    # Check if choco.exe exists but not in PATH
+    $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
+    if (Test-Path $chocoExe) {
+        Write-Info "Found existing Chocolatey installation at: $chocoExe"
+        Write-Info "Adding to PATH and creating alias..."
+        $chocoPath = "C:\ProgramData\chocolatey\bin"
+        $env:Path = "$chocoPath;$env:Path"
+        Set-Alias -Name choco -Value $chocoExe
+        Write-Success "Chocolatey available via existing installation"
         return
     }
     
     try {
+        Write-Info "Downloading and installing Chocolatey..."
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
         
-        # Refresh environment variables and PATH
-        Write-Info "Refreshing environment variables..."
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        # Install Chocolatey with explicit output capture
+        $installScript = (New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')
+        Write-Info "Executing Chocolatey installation script..."
+        Invoke-Expression $installScript
         
-        # Wait a moment for PATH to update
+        # Wait for installation to complete
+        Write-Info "Waiting for Chocolatey installation to complete..."
+        Start-Sleep -Seconds 10
+        
+        # Check if installation was successful
+        if (Test-Path $chocoExe) {
+            Write-Success "Chocolatey installation completed successfully"
+        } else {
+            throw "Chocolatey installation failed - choco.exe not found after installation"
+        }
+        
+        # Add Chocolatey to PATH for this session
+        $chocoPath = "C:\ProgramData\chocolatey\bin"
+        Write-Info "Adding Chocolatey to PATH: $chocoPath"
+        $env:Path = "$chocoPath;$env:Path"
+        
+        # Create alias for this session
+        Set-Alias -Name choco -Value $chocoExe
+        Write-Info "Created PowerShell alias for choco command"
+        
+        # Wait for PATH to take effect
         Start-Sleep -Seconds 3
         
-        # Add Chocolatey bin directory explicitly to PATH for this session
-        $chocoPath = "C:\ProgramData\chocolatey\bin"
-        if (Test-Path $chocoPath) {
-            Write-Info "Adding Chocolatey bin directory to PATH: $chocoPath"
-            $env:Path = "$chocoPath;$env:Path"
-        }
-        
-        # Wait a moment for PATH to take effect
-        Start-Sleep -Seconds 5
-        
-        # Verify Chocolatey installation
-        if (Get-Command choco -ErrorAction SilentlyContinue) {
-            Write-Success "Chocolatey installed successfully"
+        # Verify Chocolatey is working
+        try {
             $chocoVersion = & choco --version
-            Write-Info "Chocolatey version: $chocoVersion"
-        } else {
-            Write-Warning "Chocolatey installation completed but not found in PATH"
-            Write-Warning "Trying to use full path to choco.exe..."
-            $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
-            if (Test-Path $chocoExe) {
-                Write-Info "Found choco.exe at: $chocoExe"
-                # Create an alias for this session
-                Set-Alias -Name choco -Value $chocoExe
-                Write-Success "Chocolatey available via full path"
-            } else {
-                throw "Chocolatey installation failed - choco.exe not found"
-            }
+            Write-Success "Chocolatey installed and working - version: $chocoVersion"
+        } catch {
+            Write-Warning "Chocolatey installed but version check failed: $_"
+            Write-Info "Continuing with installation - choco command should be available"
         }
+        
     } catch {
         Write-Error "Failed to install Chocolatey: $_"
+        Write-Error "Error details: $($_.Exception.Message)"
+        Write-Error "Please try running the installer as Administrator or install Chocolatey manually"
         exit 1
     }
 }
@@ -322,8 +365,8 @@ function Install-Python {
         }
         
         # Install Python via Chocolatey
-        Write-Info "Running: choco install python --version=$PythonVersion -y"
-        $result = choco install python --version=$PythonVersion -y 2>&1
+        Write-Info "Installing Python $PythonVersion via Chocolatey..."
+        $result = Invoke-ChocolateyCommand -Command "install" -Arguments "python --version=$PythonVersion -y"
         Write-Info "Chocolatey output: $result"
         
         if ($LASTEXITCODE -ne 0) {
@@ -355,8 +398,8 @@ function Install-VisualCppRedistributables {
     Write-Info "Installing Visual C++ Redistributables..."
     
     try {
-        Write-Info "Running: choco install vcredist-all -y"
-        $result = choco install vcredist-all -y 2>&1
+        Write-Info "Installing Visual C++ Redistributables via Chocolatey..."
+        $result = Invoke-ChocolateyCommand -Command "install" -Arguments "vcredist-all -y"
         Write-Info "Chocolatey output: $result"
         
         if ($LASTEXITCODE -ne 0) {
@@ -382,8 +425,8 @@ function Install-Git {
             return
         }
         
-        Write-Info "Running: choco install git -y"
-        $result = choco install git -y 2>&1
+        Write-Info "Installing Git via Chocolatey..."
+        $result = Invoke-ChocolateyCommand -Command "install" -Arguments "git -y"
         Write-Info "Chocolatey output: $result"
         
         if ($LASTEXITCODE -ne 0) {
