@@ -5,7 +5,7 @@
 # Usage:
 #   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 #   $env:GITHUB_TOKEN="your_token_here"
-#   curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | pwsh
+#   curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | powershell
 #
 # Options:
 #   -TestAudioOnly          Only test audio setup, skip full installation
@@ -100,8 +100,34 @@ Real-time dual-channel audio transcription for therapy sessions
     Write-Host ""
 }
 
+function Test-PowerShellCompatibility {
+    Write-Info "Checking PowerShell compatibility..."
+    
+    $psVersion = $PSVersionTable.PSVersion
+    Write-Info "PowerShell version: $($psVersion.ToString())"
+    
+    # Check if we're running on Windows PowerShell or PowerShell Core
+    if ($PSVersionTable.PSEdition -eq "Desktop") {
+        Write-Success "Running on Windows PowerShell (Desktop edition) - Supported"
+    } else {
+        Write-Success "Running on PowerShell Core (Cross-platform edition) - Supported"
+    }
+    
+    # Check minimum PowerShell version (5.1 for Windows PowerShell, 6.0+ for Core)
+    $minVersion = if ($PSVersionTable.PSEdition -eq "Desktop") { [Version]"5.1" } else { [Version]"6.0" }
+    
+    if ($psVersion -lt $minVersion) {
+        Write-Error "PowerShell version $minVersion or later required. Found: $($psVersion.ToString())"
+        exit 1
+    }
+    Write-Success "PowerShell version compatible: $($psVersion.ToString())"
+}
+
 function Test-SystemRequirements {
     Write-Info "Checking system requirements..."
+    
+    # Check PowerShell compatibility first
+    Test-PowerShellCompatibility
     
     # Check Windows version
     $osVersion = [System.Environment]::OSVersion.Version
@@ -636,7 +662,7 @@ function Show-CompletionMessage {
     Write-ColorOutput "• Windows Audio Setup Guide: See README.md" "White"
     Write-Host ""
     Write-ColorOutput "💡 Installation Command:" "Cyan"
-    Write-ColorOutput "• `$env:GITHUB_TOKEN='your_token'; curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | pwsh" "White"
+    Write-ColorOutput "• `$env:GITHUB_TOKEN='your_token'; curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | powershell" "White"
     Write-Host ""
     Write-ColorOutput "🔐 Security Note:" "Yellow"
     Write-ColorOutput "• Your GitHub token was used for authentication and has been cleared from git config" "White"
