@@ -100,6 +100,21 @@ Real-time dual-channel audio transcription for therapy sessions
     Write-Host ""
 }
 
+function Wait-ForUserInput {
+    param(
+        [string]$Message = "Press any key to continue...",
+        [string]$Color = "White"
+    )
+    
+    try {
+        Write-ColorOutput $Message $Color
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    } catch {
+        Write-ColorOutput "Press Enter to continue..." $Color
+        Read-Host
+    }
+}
+
 function Test-PowerShellCompatibility {
     Write-Info "Checking PowerShell compatibility..."
     
@@ -203,7 +218,7 @@ function Test-GitHubToken {
         
         $response = Invoke-RestMethod -Uri "https://api.github.com/user" -Headers $headers -Method Get
         Write-Success "GitHub token validated for user: $($response.login)"
-        
+
     } catch {
         Write-Error "GitHub token validation failed: $_"
         Write-Error "Please check your token and ensure it has repository access permissions."
@@ -793,7 +808,12 @@ function Main {
         
         Write-Host ""
         Write-ColorOutput "Press any key to exit..." "Green"
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        try {
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        } catch {
+            Write-ColorOutput "Press Enter to continue..." "Green"
+            Read-Host
+        }
         
     } catch {
         Write-Error "Installation failed: $_"
@@ -801,10 +821,63 @@ function Main {
         Write-Error "Stack trace: $($_.ScriptStackTrace)"
         Write-Host ""
         Write-ColorOutput "Press any key to exit..." "Yellow"
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        try {
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        } catch {
+            Write-ColorOutput "Press Enter to continue..." "Yellow"
+            Read-Host
+        }
         exit 1
     }
 }
 
-# Run main function
-Main
+# Add debugging information
+Write-Host ""
+Write-ColorOutput "===========================================" "Green"
+Write-ColorOutput "STARTING PSYCOPILOT INSTALLER" "Green"
+Write-ColorOutput "===========================================" "Green"
+Write-Host ""
+Write-Info "PowerShell Version: $($PSVersionTable.PSVersion)"
+Write-Info "PowerShell Edition: $($PSVersionTable.PSEdition)"
+Write-Info "OS Version: $([System.Environment]::OSVersion.Version)"
+Write-Info "Current User: $([System.Environment]::UserName)"
+Write-Info "Current Directory: $(Get-Location)"
+Write-Info "Script Path: $($MyInvocation.MyCommand.Path)"
+Write-Host ""
+Write-ColorOutput "Script is starting... Press any key to continue or wait 5 seconds..." "Yellow"
+
+# Add a timeout pause to ensure the script is running
+try {
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+} catch {
+    Start-Sleep -Seconds 5
+}
+
+Write-Host ""
+
+# Wrap everything in a try-catch to prevent terminal from closing
+try {
+    # Run main function
+    Main
+} catch {
+    Write-Host ""
+    Write-ColorOutput "===========================================" "Red"
+    Write-ColorOutput "INSTALLATION FAILED" "Red"
+    Write-ColorOutput "===========================================" "Red"
+    Write-Host ""
+    Write-Error "Error: $_"
+    Write-Error "Error details: $($_.Exception.Message)"
+    Write-Error "Stack trace: $($_.ScriptStackTrace)"
+    Write-Host ""
+    Write-ColorOutput "This error occurred outside the main installation process." "Yellow"
+    Write-ColorOutput "Please check the error details above and try again." "Yellow"
+    Write-Host ""
+    Write-ColorOutput "Press any key to exit..." "Red"
+    try {
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    } catch {
+        Write-ColorOutput "Press Enter to continue..." "Red"
+        Read-Host
+    }
+    exit 1
+}
