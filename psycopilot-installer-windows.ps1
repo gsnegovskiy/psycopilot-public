@@ -5,7 +5,7 @@
 # Usage:
 #   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 #   $env:GITHUB_TOKEN="your_token_here"
-#   curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | powershell
+#   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1" | Invoke-Expression
 #
 # Options:
 #   -TestAudioOnly          Only test audio setup, skip full installation
@@ -17,7 +17,7 @@
 #   -Force                  Force overwrite existing installation
 #
 # Examples:
-#   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; .\psycopilot-installer-windows.ps1
+#   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; Invoke-WebRequest -Uri "https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1" | Invoke-Expression
 #   .\psycopilot-installer-windows.ps1 -TestAudioOnly
 #   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; .\psycopilot-installer-windows.ps1 -InstallVirtualAudio
 #   .\psycopilot-installer-windows.ps1 -EnableWSL
@@ -234,19 +234,39 @@ function Install-Python {
     Write-Info "Installing Python $PythonVersion..."
     
     try {
+        # Check if Python is already installed
+        if (Get-Command python -ErrorAction SilentlyContinue) {
+            $existingVersion = python --version 2>&1
+            Write-Success "Python already installed: $existingVersion"
+            return
+        }
+        
         # Install Python via Chocolatey
-        choco install python --version=$PythonVersion -y
+        Write-Info "Running: choco install python --version=$PythonVersion -y"
+        $result = choco install python --version=$PythonVersion -y 2>&1
+        Write-Info "Chocolatey output: $result"
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "Chocolatey installation failed with exit code: $LASTEXITCODE"
+        }
+        
         Write-Success "Python $PythonVersion installed"
         
         # Refresh PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
         
         # Verify installation
+        Start-Sleep -Seconds 2  # Give time for PATH to update
         $pythonVersion = python --version 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python installation verification failed: $pythonVersion"
+        }
         Write-Success "Python version: $pythonVersion"
         
     } catch {
         Write-Error "Failed to install Python: $_"
+        Write-Error "Last exit code: $LASTEXITCODE"
+        Write-Error "Please check Chocolatey installation and try again"
         exit 1
     }
 }
@@ -255,8 +275,16 @@ function Install-VisualCppRedistributables {
     Write-Info "Installing Visual C++ Redistributables..."
     
     try {
-        choco install vcredist-all -y
-        Write-Success "Visual C++ Redistributables installed"
+        Write-Info "Running: choco install vcredist-all -y"
+        $result = choco install vcredist-all -y 2>&1
+        Write-Info "Chocolatey output: $result"
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Visual C++ Redistributables installation failed with exit code: $LASTEXITCODE"
+            Write-Warning "Some Python packages may not work correctly"
+        } else {
+            Write-Success "Visual C++ Redistributables installed"
+        }
     } catch {
         Write-Warning "Failed to install Visual C++ Redistributables: $_"
         Write-Warning "Some Python packages may not work correctly"
@@ -267,10 +295,26 @@ function Install-Git {
     Write-Info "Installing Git..."
     
     try {
-        choco install git -y
-        Write-Success "Git installed"
+        # Check if Git is already installed
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            $existingVersion = git --version 2>&1
+            Write-Success "Git already installed: $existingVersion"
+            return
+        }
+        
+        Write-Info "Running: choco install git -y"
+        $result = choco install git -y 2>&1
+        Write-Info "Chocolatey output: $result"
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Git installation failed with exit code: $LASTEXITCODE"
+            Write-Warning "Repository cloning may not work correctly"
+        } else {
+            Write-Success "Git installed"
+        }
     } catch {
         Write-Warning "Failed to install Git: $_"
+        Write-Warning "Repository cloning may not work correctly"
     }
 }
 
@@ -278,17 +322,36 @@ function Enable-WSL {
     Write-Info "Enabling Windows Subsystem for Linux (WSL)..."
     
     try {
-        # Enable WSL feature
-        dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-        dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+        # Check if running as administrator
+        if (-not (Test-Administrator)) {
+            Write-Warning "WSL requires administrator privileges. Skipping WSL setup."
+            Write-Warning "To enable WSL manually, run as administrator and execute:"
+            Write-Warning "  dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart"
+            Write-Warning "  dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart"
+            return
+        }
         
-        Write-Success "WSL features enabled"
-        Write-Warning "Please restart your computer and run: wsl --install"
-        Write-Warning "Then run this installer again to continue with WSL setup"
+        # Enable WSL feature
+        Write-Info "Enabling WSL feature..."
+        $result1 = dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart 2>&1
+        Write-Info "DISM output: $result1"
+        
+        Write-Info "Enabling Virtual Machine Platform feature..."
+        $result2 = dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart 2>&1
+        Write-Info "DISM output: $result2"
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "WSL feature enablement failed with exit code: $LASTEXITCODE"
+            Write-Warning "WSL may not work correctly"
+        } else {
+            Write-Success "WSL features enabled"
+            Write-Warning "Please restart your computer and run: wsl --install"
+            Write-Warning "Then run this installer again to continue with WSL setup"
+        }
         
     } catch {
-        Write-Error "Failed to enable WSL: $_"
-        exit 1
+        Write-Warning "Failed to enable WSL: $_"
+        Write-Warning "WSL may not work correctly"
     }
 }
 
@@ -662,7 +725,7 @@ function Show-CompletionMessage {
     Write-ColorOutput "• Windows Audio Setup Guide: See README.md" "White"
     Write-Host ""
     Write-ColorOutput "💡 Installation Command:" "Cyan"
-    Write-ColorOutput "• `$env:GITHUB_TOKEN='your_token'; curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | powershell" "White"
+    Write-ColorOutput "• `$env:GITHUB_TOKEN='your_token'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1' | Invoke-Expression" "White"
     Write-Host ""
     Write-ColorOutput "🔐 Security Note:" "Yellow"
     Write-ColorOutput "• Your GitHub token was used for authentication and has been cleared from git config" "White"
@@ -690,9 +753,16 @@ function Main {
         Test-GitHubToken
         
         # Install system dependencies
+        Write-Info "Starting system dependency installation..."
         Install-Chocolatey
+        
+        Write-Info "Installing Python..."
         Install-Python
+        
+        Write-Info "Installing Visual C++ Redistributables..."
         Install-VisualCppRedistributables
+        
+        Write-Info "Installing Git..."
         Install-Git
         
         # Enable WSL by default (unless explicitly disabled or only testing audio)
@@ -721,8 +791,17 @@ function Main {
         
         Show-CompletionMessage
         
+        Write-Host ""
+        Write-ColorOutput "Press any key to exit..." "Green"
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        
     } catch {
         Write-Error "Installation failed: $_"
+        Write-Error "Error details: $($_.Exception.Message)"
+        Write-Error "Stack trace: $($_.ScriptStackTrace)"
+        Write-Host ""
+        Write-ColorOutput "Press any key to exit..." "Yellow"
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         exit 1
     }
 }
