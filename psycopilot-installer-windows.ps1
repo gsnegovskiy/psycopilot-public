@@ -21,6 +21,7 @@
 #   .\psycopilot-installer-windows.ps1 -TestAudioOnly
 #   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; .\psycopilot-installer-windows.ps1 -InstallVirtualAudio
 #   .\psycopilot-installer-windows.ps1 -EnableWSL
+#   .\psycopilot-installer-windows.ps1 -Force  # Overwrite existing installation
 
 param(
     [switch]$EnableWSL,
@@ -112,6 +113,44 @@ function Wait-ForUserInput {
     } catch {
         Write-ColorOutput "Press Enter to continue..." $Color
         Read-Host
+    }
+}
+
+function Test-InstallationDirectory {
+    Write-Info "Checking installation directory..."
+    
+    if (Test-Path $InstallDir) {
+        Write-Warning "Installation directory already exists: $InstallDir"
+        Write-Warning "Contents:"
+        Get-ChildItem $InstallDir | ForEach-Object { Write-Warning "  - $($_.Name)" }
+        
+        if ($Force) {
+            Write-Info "Force flag specified. Removing existing directory..."
+            try {
+                Remove-Item -Path $InstallDir -Recurse -Force
+                Write-Success "Existing directory removed"
+            } catch {
+                Write-Error "Failed to remove existing directory: $_"
+                exit 1
+            }
+        } else {
+            Write-Warning "Use -Force flag to overwrite existing installation"
+            Write-Warning "Or choose a different installation directory with -InstallDir"
+            exit 1
+        }
+    } else {
+        Write-Success "Installation directory is available: $InstallDir"
+    }
+}
+
+function Refresh-EnvironmentPath {
+    Write-Info "Refreshing environment PATH..."
+    try {
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        Start-Sleep -Seconds 1
+        Write-Success "Environment PATH refreshed"
+    } catch {
+        Write-Warning "Failed to refresh PATH: $_"
     }
 }
 
@@ -208,7 +247,7 @@ function Test-GitHubToken {
         Write-Warning "GitHub token format appears invalid. Expected format: ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx"
         Write-Warning "Continuing anyway, but authentication may fail..."
     }
-    
+
     # Test token by making a request to GitHub API
     try {
         $headers = @{
@@ -238,7 +277,29 @@ function Install-Chocolatey {
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
         Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        Write-Success "Chocolatey installed successfully"
+        
+        # Refresh environment variables and PATH
+        Write-Info "Refreshing environment variables..."
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        
+        # Wait a moment for PATH to update
+        Start-Sleep -Seconds 3
+        
+        # Verify Chocolatey installation
+        if (Get-Command choco -ErrorAction SilentlyContinue) {
+            Write-Success "Chocolatey installed successfully"
+        } else {
+            Write-Warning "Chocolatey installed but not found in PATH. Trying to refresh again..."
+            # Try to refresh PATH again
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            Start-Sleep -Seconds 2
+            
+            if (Get-Command choco -ErrorAction SilentlyContinue) {
+                Write-Success "Chocolatey found after PATH refresh"
+            } else {
+                throw "Chocolatey installation completed but 'choco' command not found in PATH"
+            }
+        }
     } catch {
         Write-Error "Failed to install Chocolatey: $_"
         exit 1
@@ -340,9 +401,20 @@ function Enable-WSL {
         # Check if running as administrator
         if (-not (Test-Administrator)) {
             Write-Warning "WSL requires administrator privileges. Skipping WSL setup."
-            Write-Warning "To enable WSL manually, run as administrator and execute:"
-            Write-Warning "  dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart"
-            Write-Warning "  dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart"
+            Write-Warning "To enable WSL manually:"
+            Write-Warning "1. Right-click PowerShell and select 'Run as Administrator'"
+            Write-Warning "2. Run this installer again with administrator privileges"
+            Write-Warning "3. Or manually enable WSL with these commands:"
+            Write-Warning "   dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart"
+            Write-Warning "   dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart"
+            Write-Warning "   wsl --install"
+            return
+        }
+        
+        # Check if WSL is already enabled
+        $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+        if ($wslFeature -and $wslFeature.State -eq "Enabled") {
+            Write-Success "WSL is already enabled"
             return
         }
         
@@ -766,6 +838,7 @@ function Main {
         
         Test-SystemRequirements
         Test-GitHubToken
+        Test-InstallationDirectory
         
         # Install system dependencies
         Write-Info "Starting system dependency installation..."
@@ -773,12 +846,14 @@ function Main {
         
         Write-Info "Installing Python..."
         Install-Python
+        Refresh-EnvironmentPath
         
         Write-Info "Installing Visual C++ Redistributables..."
         Install-VisualCppRedistributables
         
         Write-Info "Installing Git..."
         Install-Git
+        Refresh-EnvironmentPath
         
         # Enable WSL by default (unless explicitly disabled or only testing audio)
         if ($EnableWSL -or (-not $TestAudioOnly)) {
