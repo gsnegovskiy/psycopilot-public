@@ -4,6 +4,7 @@
 # 
 # Usage:
 #   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+#   $env:GITHUB_TOKEN="your_token_here"
 #   curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | pwsh
 #
 # Options:
@@ -12,11 +13,13 @@
 #   -EnableWSL              Enable Windows Subsystem for Linux
 #   -PythonVersion          Specify Python version (default: 3.13)
 #   -InstallDir             Installation directory (default: $env:USERPROFILE\psycopilot)
+#   -GitHubToken            GitHub personal access token for private repository access
 #   -Force                  Force overwrite existing installation
 #
 # Examples:
+#   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; .\psycopilot-installer-windows.ps1
 #   .\psycopilot-installer-windows.ps1 -TestAudioOnly
-#   .\psycopilot-installer-windows.ps1 -InstallVirtualAudio
+#   $env:GITHUB_TOKEN="ghp_xxxxxxxxxxxx"; .\psycopilot-installer-windows.ps1 -InstallVirtualAudio
 #   .\psycopilot-installer-windows.ps1 -EnableWSL
 
 param(
@@ -25,12 +28,13 @@ param(
     [switch]$TestAudioOnly,
     [string]$PythonVersion = "3.13",
     [string]$InstallDir = "$env:USERPROFILE\psycopilot",
+    [string]$GitHubToken,
     [switch]$Force
 )
 
 # Configuration
 $APP_VERSION = "1.0.0"
-$GITHUB_REPO = "gsnegovskiy/psycopilot-public"
+$GITHUB_REPO = "gsnegovskiy/psycopilot"
 $MIN_WINDOWS_VERSION = "10.0.19041"  # Windows 10 2004 or later
 
 # Colors for output
@@ -132,6 +136,52 @@ function Test-SystemRequirements {
         Write-Warning "Not running as administrator. Some features may require elevation."
     } else {
         Write-Success "Running with administrator privileges"
+    }
+}
+
+function Test-GitHubToken {
+    Write-Info "Validating GitHub token..."
+    
+    # Check for token in parameter first, then environment variable
+    if (-not $GitHubToken) {
+        $GitHubToken = $env:GITHUB_TOKEN
+    }
+    
+    if (-not $GitHubToken) {
+        Write-Error "GitHub token is required for private repository access."
+        Write-Error "Please provide a GitHub personal access token with repository access."
+        Write-Error ""
+        Write-Error "Option 1 - Environment variable:"
+        Write-Error "  `$env:GITHUB_TOKEN='ghp_xxxxxxxxxxxx'"
+        Write-Error "  .\psycopilot-installer-windows.ps1"
+        Write-Error ""
+        Write-Error "Option 2 - Parameter:"
+        Write-Error "  .\psycopilot-installer-windows.ps1 -GitHubToken 'ghp_xxxxxxxxxxxx'"
+        Write-Error ""
+        Write-Error "To get a token ask Greg for it"
+        exit 1
+    }
+    
+    # Validate token format
+    if (-not ($GitHubToken -match "^ghp_[A-Za-z0-9]{36}$" -or $GitHubToken -match "^github_pat_[A-Za-z0-9_]{82}$")) {
+        Write-Warning "GitHub token format appears invalid. Expected format: ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx"
+        Write-Warning "Continuing anyway, but authentication may fail..."
+    }
+    
+    # Test token by making a request to GitHub API
+    try {
+        $headers = @{
+            "Authorization" = "token $GitHubToken"
+            "Accept" = "application/vnd.github.v3+json"
+        }
+        
+        $response = Invoke-RestMethod -Uri "https://api.github.com/user" -Headers $headers -Method Get
+        Write-Success "GitHub token validated for user: $($response.login)"
+        
+    } catch {
+        Write-Error "GitHub token validation failed: $_"
+        Write-Error "Please check your token and ensure it has repository access permissions."
+        exit 1
     }
 }
 
@@ -462,22 +512,45 @@ function Download-PsycoPilot {
     Write-Info "Downloading PsycoPilot application..."
     
     try {
-        # Clone or download the repository
+        # Clone or download the repository with authentication
         if (Get-Command git -ErrorAction SilentlyContinue) {
-            Write-Info "Cloning repository..."
-            git clone https://github.com/$GITHUB_REPO.git .
+            Write-Info "Cloning repository with authentication..."
+            
+            # Configure git to use the token for authentication
+            $repoUrl = "https://$GitHubToken@github.com/$GITHUB_REPO.git"
+            
+            # Clone the repository
+            git clone $repoUrl .
+            
+            # Remove token from git config for security
+            git config --unset credential.helper
+            git config --unset credential.https://github.com.username
+            
         } else {
-            Write-Info "Downloading repository as ZIP..."
-            $zipUrl = "https://github.com/$GITHUB_REPO/archive/refs/heads/master.zip"
+            Write-Info "Downloading repository as ZIP with authentication..."
+            
+            # Use GitHub API to download the repository as ZIP
+            $zipUrl = "https://api.github.com/repos/$GITHUB_REPO/zipball/main"
             $zipFile = Join-Path $InstallDir "psycopilot.zip"
             
-            Invoke-WebRequest -Uri $zipUrl -OutFile $zipFile
+            $headers = @{
+                "Authorization" = "token $GitHubToken"
+                "Accept" = "application/vnd.github.v3+json"
+            }
+            
+            Write-Info "Downloading from GitHub API..."
+            Invoke-WebRequest -Uri $zipUrl -Headers $headers -OutFile $zipFile
+            
+            Write-Info "Extracting repository..."
             Expand-Archive -Path $zipFile -DestinationPath $InstallDir -Force
             
-            # Move contents from subdirectory
-            $extractedDir = Join-Path $InstallDir "psycopilot-public-master"
-            Get-ChildItem -Path $extractedDir | Move-Item -Destination $InstallDir
-            Remove-Item -Path $extractedDir -Recurse -Force
+            # Move contents from subdirectory (GitHub API creates a folder with commit hash)
+            $extractedDirs = Get-ChildItem -Path $InstallDir -Directory | Where-Object { $_.Name -like "gsnegovskiy-psycopilot-*" }
+            if ($extractedDirs.Count -gt 0) {
+                $extractedDir = $extractedDirs[0].FullName
+                Get-ChildItem -Path $extractedDir | Move-Item -Destination $InstallDir
+                Remove-Item -Path $extractedDir -Recurse -Force
+            }
             Remove-Item -Path $zipFile -Force
         }
         
@@ -485,6 +558,7 @@ function Download-PsycoPilot {
         
     } catch {
         Write-Error "Failed to download PsycoPilot: $_"
+        Write-Error "Please check your GitHub token and repository access permissions."
         exit 1
     }
 }
@@ -561,6 +635,13 @@ function Show-CompletionMessage {
     Write-ColorOutput "• GitHub: https://github.com/$GITHUB_REPO" "White"
     Write-ColorOutput "• Windows Audio Setup Guide: See README.md" "White"
     Write-Host ""
+    Write-ColorOutput "💡 Installation Command:" "Cyan"
+    Write-ColorOutput "• `$env:GITHUB_TOKEN='your_token'; curl -fsSL https://raw.githubusercontent.com/gsnegovskiy/psycopilot-public/master/psycopilot-installer-windows.ps1 | pwsh" "White"
+    Write-Host ""
+    Write-ColorOutput "🔐 Security Note:" "Yellow"
+    Write-ColorOutput "• Your GitHub token was used for authentication and has been cleared from git config" "White"
+    Write-ColorOutput "• Keep your GitHub token secure and do not share it" "White"
+    Write-Host ""
 }
 
 # Main installation process
@@ -580,6 +661,7 @@ function Main {
         }
         
         Test-SystemRequirements
+        Test-GitHubToken
         
         # Install system dependencies
         Install-Chocolatey
@@ -587,10 +669,11 @@ function Main {
         Install-VisualCppRedistributables
         Install-Git
         
-        # Optional installations
-        if ($EnableWSL) {
+        # Enable WSL by default (unless explicitly disabled or only testing audio)
+        if ($EnableWSL -or (-not $TestAudioOnly)) {
+            Write-Info "Enabling Windows Subsystem for Linux (WSL)..."
             Enable-WSL
-            return  # Exit after WSL setup, user needs to restart
+            Write-Info "WSL setup completed. Continuing with installation..."
         }
         
         if ($InstallVirtualAudio) {
