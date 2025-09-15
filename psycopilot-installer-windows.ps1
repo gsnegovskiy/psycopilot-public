@@ -308,10 +308,9 @@ function Install-Chocolatey {
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
         
-        # Install Chocolatey with explicit output capture
-        $installScript = (New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')
+        # Install Chocolatey using official documentation command
         Write-Info "Executing Chocolatey installation script..."
-        Invoke-Expression $installScript
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
         
         # Wait for installation to complete
         Write-Info "Waiting for Chocolatey installation to complete..."
@@ -565,7 +564,7 @@ function Enable-StereoMix {
     try {
         # This requires registry modification to enable Stereo Mix
         $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
-        
+
         # Get all audio render devices
         $renderDevices = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue
         
